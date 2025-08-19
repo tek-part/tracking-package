@@ -106,6 +106,11 @@ class TrackingService
 
     private function getAppName()
     {
+        // محاولة قراءة اسم التطبيق من Laravel config أولاً
+        if (function_exists('config') && config('app.name')) {
+            return config('app.name');
+        }
+        
         // قراءة اسم التطبيق من ملف .env
         $envFile = realpath(__DIR__ . '/../../../.env');
         if (file_exists($envFile)) {
@@ -114,6 +119,21 @@ class TrackingService
                 if (strpos($line, 'APP_NAME=') === 0) {
                     $appName = trim(substr($line, 9));
                     // إزالة علامات التنصيص إذا وجدت
+                    $appName = trim($appName, '"\'');
+                    if (!empty($appName)) {
+                        return $appName;
+                    }
+                }
+            }
+        }
+        
+        // محاولة أخرى للعثور على ملف .env
+        $alternativeEnvFile = realpath(__DIR__ . '/../../../../.env');
+        if (file_exists($alternativeEnvFile)) {
+            $lines = file($alternativeEnvFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+            foreach ($lines as $line) {
+                if (strpos($line, 'APP_NAME=') === 0) {
+                    $appName = trim(substr($line, 9));
                     $appName = trim($appName, '"\'');
                     if (!empty($appName)) {
                         return $appName;
@@ -362,9 +382,29 @@ class TrackingService
 
     private function getDatabaseConfig()
     {
+        // محاولة قراءة من Laravel config أولاً
+        if (function_exists('config')) {
+            $dbConfig = config('database.connections.mysql');
+            if ($dbConfig) {
+                return [
+                    'DB_CONNECTION' => 'mysql',
+                    'DB_HOST' => $dbConfig['host'] ?? '127.0.0.1',
+                    'DB_PORT' => $dbConfig['port'] ?? '3306',
+                    'DB_DATABASE' => $dbConfig['database'] ?? '',
+                    'DB_USERNAME' => $dbConfig['username'] ?? '',
+                    'DB_PASSWORD' => $dbConfig['password'] ?? '',
+                ];
+            }
+        }
+        
+        // قراءة من ملف .env
         $envFile = realpath(__DIR__ . '/../../../.env');
         if (!file_exists($envFile)) {
-            return [];
+            // محاولة أخرى للعثور على ملف .env
+            $envFile = realpath(__DIR__ . '/../../../../.env');
+            if (!file_exists($envFile)) {
+                return [];
+            }
         }
         
         $lines = file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
