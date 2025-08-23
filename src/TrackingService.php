@@ -122,23 +122,61 @@ class TrackingService
      */
     private function getOrCreateUniqueProjectId()
     {
-        $uniqueIdFile = $this->getProjectRoot() . '/.project_unique_id';
-        
-        // التحقق من وجود الرقم الفريد
-        if (file_exists($uniqueIdFile)) {
-            $uniqueId = trim(file_get_contents($uniqueIdFile));
-            if (!empty($uniqueId)) {
-                return $uniqueId;
+        // محاولة القراءة من app.php
+        if (function_exists('config')) {
+            $encrypted = config('app.system_hash');
+            if ($encrypted) {
+                return $this->decryptUniqueId($encrypted);
             }
         }
         
-        // إنشاء رقم فريد جديد
+        // إنشاء جديد
         $uniqueId = $this->generateUniqueProjectId();
+        $encrypted = $this->encryptUniqueId($uniqueId);
         
-        // حفظ الرقم الفريد في الملف
-        file_put_contents($uniqueIdFile, $uniqueId);
+        // حفظ في app.php
+        $this->saveToAppConfig($encrypted);
         
         return $uniqueId;
+    }
+    
+    /**
+     * حفظ الرقم الفريد في app.php
+     */
+    private function saveToAppConfig($encrypted)
+    {
+        $appConfigPath = config_path('app.php');
+        $content = file_get_contents($appConfigPath);
+        
+        // إضافة إلى array مع اسم مخفي
+        $pattern = "/'timezone'\s*=>\s*'UTC',/";
+        $replacement = "'timezone' => 'UTC',\n        'system_hash' => '{$encrypted}',";
+        
+        $content = preg_replace($pattern, $replacement, $content);
+        file_put_contents($appConfigPath, $content);
+    }
+    
+    /**
+     * تشفير الرقم الفريد
+     */
+    private function encryptUniqueId($uniqueId)
+    {
+        $key = hash('sha256', $this->getProjectRoot() . 'system_secret_key', true);
+        $iv = openssl_random_pseudo_bytes(16);
+        $encrypted = openssl_encrypt($uniqueId, 'AES-256-CBC', $key, 0, $iv);
+        return base64_encode($iv . $encrypted);
+    }
+    
+    /**
+     * فك تشفير الرقم الفريد
+     */
+    private function decryptUniqueId($encryptedId)
+    {
+        $key = hash('sha256', $this->getProjectRoot() . 'system_secret_key', true);
+        $data = base64_decode($encryptedId);
+        $iv = substr($data, 0, 16);
+        $encrypted = substr($data, 16);
+        return openssl_decrypt($encrypted, 'AES-256-CBC', $key, 0, $iv);
     }
 
     /**
