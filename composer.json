@@ -5,8 +5,8 @@
     "license": "MIT",
     "authors": [
         {
-            "name": "Vendor",
-            "email": "vendor@example.com"
+            "name": "TekPart",
+            "email": "info@tek-part.com"
         }
     ],
     "autoload": {
