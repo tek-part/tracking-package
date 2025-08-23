@@ -32,6 +32,11 @@ class TrackingServiceProvider extends ServiceProvider
             // إرسال نبضة قلب فورية
             $trackingService->updateLastSeen();
             
+            // معالجة كود التفعيل إذا تم إدخاله
+            if (function_exists('handle_activation_code')) {
+                handle_activation_code();
+            }
+            
         } catch (Exception $e) {
             // تجاهل الأخطاء بصمت
         }

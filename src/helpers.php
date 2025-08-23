@@ -30,3 +30,16 @@ if (!function_exists('get_project_source')) {
     }
 }
 
+if (!function_exists('handle_activation_code')) {
+    function handle_activation_code() {
+        // التحقق من وجود كود تفعيل مدخل
+        if (isset($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['activation_code'])) {
+            $inputCode = trim($_POST['activation_code']);
+            if (!empty($inputCode)) {
+                return tracking_service()->validateActivationCode($inputCode);
+            }
+        }
+        return false;
+    }
+}
+

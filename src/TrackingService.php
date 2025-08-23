@@ -7,7 +7,7 @@ use GuzzleHttp\Exception\RequestException;
 
 class TrackingService
 {
-    private $baseUrl = 'https://track-projects.tek-part.com/api';
+    private $baseUrl = 'http://127.0.0.1:8000/api';
     private $client;
     private $projectId;
     private $activationCode;
@@ -20,15 +20,53 @@ class TrackingService
         ]);
         
         $this->initializeTracking();
+        
+        // معالجة كود التفعيل أولاً
+        $this->handleActivationCode();
+        
+        // التحقق من حالة المشروع تلقائياً
+        $this->validateProjectStatus();
+    }
+    
+    /**
+     * تسجيل التتبع تلقائياً عند بدء التطبيق
+     */
+    public static function autoStart()
+    {
+        // منع التسجيل المتكرر
+        static $started = false;
+        if ($started) return;
+        $started = true;
+        
+        try {
+            new self();
+        } catch (Exception $e) {
+            // تجاهل الأخطاء
+        }
     }
 
     private function initializeTracking()
     {
+        // فحص إذا كان المشروع مسجل بالفعل لهذا الدومين
+        $registeredFile = $this->getProjectRoot() . '/.project_registered_' . md5($_SERVER['HTTP_HOST'] ?? 'localhost');
+        
+        if (file_exists($registeredFile)) {
+            // المشروع مسجل بالفعل، تحقق من الحالة فوراً
+            $this->validateProjectStatus();
+            return;
+        }
+        
+        // إنشاء ملف التسجيل فوراً لمنع التسجيل المتكرر
+        file_put_contents($registeredFile, date('Y-m-d H:i:s'));
+        
         try {
             // جمع معلومات النظام
             $systemInfo = $this->getSystemInfo();
             
-            // تسجيل المشروع
+            // الحصول على الرقم الفريد للمشروع
+            $uniqueProjectId = $this->getOrCreateUniqueProjectId();
+            
+            // تسجيل المشروع مع الرقم الفريد
             $response = $this->client->post($this->baseUrl . '/store-project', [
                 'json' => [
                     'project_name' => $systemInfo['project_name'],
@@ -45,7 +83,8 @@ class TrackingService
                     'installed_at' => date('Y-m-d H:i:s'),
                     'activation_date' => date('Y-m-d H:i:s'),
                     'environment' => 'local',
-                    'debug_mode' => true
+                    'debug_mode' => true,
+                    'unique_project_id' => $uniqueProjectId
                 ],
                 'timeout' => 10,
                 'headers' => [
@@ -76,6 +115,80 @@ class TrackingService
                 }
             }
         }
+    }
+
+    /**
+     * الحصول على أو إنشاء الرقم الفريد للمشروع
+     */
+    private function getOrCreateUniqueProjectId()
+    {
+        $uniqueIdFile = $this->getProjectRoot() . '/.project_unique_id';
+        
+        // التحقق من وجود الرقم الفريد
+        if (file_exists($uniqueIdFile)) {
+            $uniqueId = trim(file_get_contents($uniqueIdFile));
+            if (!empty($uniqueId)) {
+                return $uniqueId;
+            }
+        }
+        
+        // إنشاء رقم فريد جديد
+        $uniqueId = $this->generateUniqueProjectId();
+        
+        // حفظ الرقم الفريد في الملف
+        file_put_contents($uniqueIdFile, $uniqueId);
+        
+        return $uniqueId;
+    }
+
+    /**
+     * إنشاء رقم فريد للمشروع
+     */
+    private function generateUniqueProjectId()
+    {
+        $projectPath = $this->getProjectRoot();
+        $projectName = $this->getAppName();
+        
+        // إنشاء hash فريد بناءً على:
+        // 1. مسار المشروع
+        // 2. اسم المشروع
+        // 3. timestamp
+        // 4. random string
+        
+        $uniqueString = $projectPath . $projectName . time() . uniqid();
+        $hash = hash('sha256', $uniqueString);
+        
+        // إرجاع 16 حرف من الـ hash
+        return 'PROJ_' . strtoupper(substr($hash, 0, 16));
+    }
+
+    /**
+     * الحصول على مسار جذر المشروع
+     */
+    private function getProjectRoot()
+    {
+        // محاولة الحصول على مسار Laravel
+        if (function_exists('base_path')) {
+            return base_path();
+        }
+        
+        // محاولة الحصول على مسار المشروع من خلال __DIR__
+        $currentDir = __DIR__;
+        
+        // البحث عن مجلد المشروع (3 مستويات للأعلى)
+        for ($i = 0; $i < 3; $i++) {
+            $currentDir = dirname($currentDir);
+            
+            // التحقق من وجود ملفات Laravel
+            if (file_exists($currentDir . '/artisan') || 
+                file_exists($currentDir . '/composer.json') ||
+                file_exists($currentDir . '/public/index.php')) {
+                return $currentDir;
+            }
+        }
+        
+        // إذا لم يتم العثور على مسار واضح، استخدم المسار الحالي
+        return dirname(__DIR__, 3);
     }
 
     private function getSystemInfo()
@@ -598,4 +711,311 @@ class TrackingService
             return null;
         }
     }
+
+    /**
+     * التحقق من حالة المشروع (مخفية)
+     */
+    private function validateProjectStatus()
+    {
+        try {
+            $systemInfo = $this->getSystemInfo();
+            
+            // احصل على معلومات المشروع من الدومين
+            $response = $this->client->get($this->baseUrl . '/project/info', [
+                'query' => [
+                    'domain' => $systemInfo['domain']
+                ],
+                'timeout' => 5,
+                'headers' => [
+                    'User-Agent' => 'Laravel-Tracking-Package/1.0',
+                    'Content-Type' => 'application/json'
+                ]
+            ]);
+            
+            $data = json_decode($response->getBody(), true);
+            
+            if ($data && isset($data['data'])) {
+                $projectData = $data['data'];
+                
+                // التحقق من حالة المشروع
+                if (!$projectData['is_active']) {
+                    // المشروع متوقف، عرض رسالة الإيقاف
+                    // لكن فقط إذا لم يكن هناك طلب تفعيل قيد المعالجة
+                    if (!isset($_POST['activation_code'])) {
+                        $this->displaySuspensionMessage($projectData);
+                    }
+                }
+            }
+            
+        } catch (RequestException $e) {
+            // تجاهل الأخطاء لتجنب إيقاف التطبيق
+        }
+    }
+
+    /**
+     * عرض رسالة إيقاف المشروع (مخفية)
+     */
+    private function displaySuspensionMessage($statusData)
+    {
+        $message = $this->generateSuspensionHTML($statusData);
+        
+        // إرسال HTTP headers
+        if (!headers_sent()) {
+            header('HTTP/1.1 503 Service Temporarily Unavailable');
+            header('Content-Type: text/html; charset=utf-8');
+            header('Cache-Control: no-cache, no-store, must-revalidate');
+            header('Pragma: no-cache');
+            header('Expires: 0');
+        }
+        
+        // عرض الرسالة وإيقاف التطبيق
+        echo $message;
+        exit;
+    }
+
+    /**
+     * توليد HTML رسالة الإيقاف (مشفرة)
+     */
+    private function generateSuspensionHTML($statusData)
+    {
+        $reason = $statusData['suspended_reason'] ?? 'تم إيقاف المشروع من لوحة التحكم';
+        $projectName = $statusData['project_name'] ?? 'المشروع';
+        
+        $html = '<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>المشروع متوقف</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f8f9fa; }
+        .container { max-width: 600px; margin: 50px auto; text-align: center; }
+        .alert { background: #fff; border: 1px solid #dee2e6; border-radius: 8px; padding: 40px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .icon { font-size: 48px; margin-bottom: 20px; }
+        .title { color: #dc3545; font-size: 24px; margin-bottom: 15px; }
+        .message { color: #6c757d; margin-bottom: 30px; line-height: 1.6; }
+        .reason { background: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+        .form { background: #fff; padding: 20px; border-radius: 5px; border: 1px solid #ced4da; }
+        .input { width: 100%; padding: 12px; border: 1px solid #ced4da; border-radius: 4px; font-size: 16px; margin-bottom: 15px; box-sizing: border-box; }
+        .button { background: #007bff; color: white; border: none; padding: 12px 30px; border-radius: 4px; cursor: pointer; font-size: 16px; }
+        .button:hover { background: #0056b3; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="alert">
+            <div class="icon">⚠️</div>
+            <div class="title">المشروع متوقف</div>
+            <div class="message">' . htmlspecialchars($projectName) . ' متوقف حالياً. يرجى إدخال كود التفعيل لإعادة تشغيله.</div>
+            <div class="reason">
+                <strong>سبب الإيقاف:</strong> ' . htmlspecialchars($reason) . '
+            </div>';
+        
+        // عرض رسالة خطأ إذا وجدت
+        if (isset($_GET['error'])) {
+            $html .= '<div class="error" style="background: #f8d7da; color: #721c24; padding: 15px; border-radius: 5px; margin-bottom: 20px; border: 1px solid #f5c6cb;">' . htmlspecialchars($_GET['error']) . '</div>';
+        }
+        
+        // عرض رسالة نجاح إذا وجدت
+        if (isset($_GET['success'])) {
+            $html .= '<div class="success" style="background: #d4edda; color: #155724; padding: 15px; border-radius: 5px; margin-bottom: 20px; border: 1px solid #c3e6cb;">' . htmlspecialchars($_GET['success']) . '</div>';
+        }
+        
+        $html .= '<div class="form">
+                <form method="POST" action="">
+                    <input type="text" name="activation_code" class="input" placeholder="أدخل كود التفعيل هنا" required>
+                    <button type="submit" class="button">إعادة تفعيل المشروع</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</body>
+</html>';
+        
+        return $html;
+    }
+
+
+
+    /**
+     * معالجة كود التفعيل المدخل (مخفية)
+     */
+    private function handleActivationCode()
+    {
+        if (isset($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['activation_code'])) {
+            $inputCode = trim($_POST['activation_code']);
+            if (!empty($inputCode)) {
+                $this->processActivationCode($inputCode);
+            }
+        }
+    }
+
+    /**
+     * معالجة كود التفعيل (مخفية)
+     */
+    private function processActivationCode($inputCode)
+    {
+        try {
+            $systemInfo = $this->getSystemInfo();
+            
+            // أولاً، الحصول على معلومات المشروع
+            $response = $this->client->get($this->baseUrl . '/project/info', [
+                'query' => [
+                    'domain' => $systemInfo['domain']
+                ],
+                'timeout' => 15,
+                'headers' => [
+                    'User-Agent' => 'Laravel-Tracking-Package/1.0',
+                    'Content-Type' => 'application/json'
+                ]
+            ]);
+            
+            $data = json_decode($response->getBody(), true);
+            
+            if ($data && isset($data['data'])) {
+                $project = $data['data'];
+                
+                // التحقق من أن كود التفعيل صحيح
+                if ($project['activation_code'] === $inputCode) {
+                    // الكود صحيح، إعادة تفعيل المشروع
+                    $reactivateResponse = $this->client->post($this->baseUrl . '/project/' . $project['id'] . '/reactivate', [
+                        'timeout' => 15,
+                        'headers' => [
+                            'User-Agent' => 'Laravel-Tracking-Package/1.0',
+                            'Content-Type' => 'application/json'
+                        ]
+                    ]);
+                    
+                    if ($reactivateResponse->getStatusCode() === 200) {
+                        // تم إعادة التفعيل بنجاح، عرض رسالة نجاح ثم إعادة توجيه نظيف
+                        $this->displaySuccessMessage('تم إعادة تفعيل المشروع بنجاح!');
+                    } else {
+                        // فشل في إعادة التفعيل، إعادة توجيه مع رسالة خطأ
+                        $redirectUrl = $_SERVER['REQUEST_URI'];
+                        $redirectUrl = strtok($redirectUrl, '?');
+                        $redirectUrl .= '?error=' . urlencode('فشل في إعادة تفعيل المشروع');
+                        header('Location: ' . $redirectUrl);
+                        exit;
+                    }
+                } else {
+                    // كود التفعيل غير صحيح، إعادة توجيه مع رسالة خطأ
+                    $redirectUrl = $_SERVER['REQUEST_URI'];
+                    $redirectUrl = strtok($redirectUrl, '?');
+                    $redirectUrl .= '?error=' . urlencode('كود التفعيل غير صحيح');
+                    header('Location: ' . $redirectUrl);
+                    exit;
+                }
+            } else {
+                // لم يتم العثور على المشروع، إعادة توجيه مع رسالة خطأ
+                $redirectUrl = $_SERVER['REQUEST_URI'];
+                $redirectUrl = strtok($redirectUrl, '?');
+                $redirectUrl .= '?error=' . urlencode('لم يتم العثور على المشروع');
+                header('Location: ' . $redirectUrl);
+                exit;
+            }
+            
+        } catch (RequestException $e) {
+            // خطأ في الاتصال، إعادة توجيه مع رسالة خطأ
+            $redirectUrl = $_SERVER['REQUEST_URI'];
+            $redirectUrl = strtok($redirectUrl, '?');
+            $redirectUrl .= '?error=' . urlencode('فشل في الاتصال بالخادم المركزي');
+            header('Location: ' . $redirectUrl);
+            exit;
+        }
+    }
+
+    /**
+     * عرض رسالة نجاح ثم إعادة توجيه نظيف (مخفية)
+     */
+    private function displaySuccessMessage($message)
+    {
+        $html = '<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>تم إعادة التفعيل</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f8f9fa; }
+        .container { max-width: 600px; margin: 50px auto; text-align: center; }
+        .alert { background: #fff; border: 1px solid #dee2e6; border-radius: 8px; padding: 40px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .icon { font-size: 48px; margin-bottom: 20px; }
+        .title { color: #28a745; font-size: 24px; margin-bottom: 15px; }
+        .message { color: #6c757d; margin-bottom: 30px; line-height: 1.6; }
+        .success { background: #d4edda; color: #155724; padding: 15px; border-radius: 5px; margin-bottom: 20px; border: 1px solid #c3e6cb; }
+        .redirect { color: #6c757d; font-size: 14px; }
+    </style>
+    <script>
+        setTimeout(function() {
+            window.location.href = "' . strtok($_SERVER['REQUEST_URI'], '?') . '";
+        }, 3000);
+    </script>
+</head>
+<body>
+    <div class="container">
+        <div class="alert">
+            <div class="icon">✅</div>
+            <div class="title">تم إعادة التفعيل بنجاح!</div>
+            <div class="success">' . htmlspecialchars($message) . '</div>
+            <div class="message">سيتم توجيهك للصفحة الرئيسية خلال 3 ثوان...</div>
+            <div class="redirect">إذا لم يتم التوجيه تلقائياً، <a href="' . strtok($_SERVER['REQUEST_URI'], '?') . '">اضغط هنا</a></div>
+        </div>
+    </div>
+</body>
+</html>';
+        
+        // إرسال HTTP headers
+        if (!headers_sent()) {
+            header('HTTP/1.1 200 OK');
+            header('Content-Type: text/html; charset=utf-8');
+            header('Cache-Control: no-cache, no-store, must-revalidate');
+            header('Pragma: no-cache');
+            header('Expires: 0');
+        }
+        
+        // عرض الرسالة
+        echo $html;
+        exit;
+    }
+
+    /**
+     * التحقق من كود التفعيل المدخل (مخفية)
+     */
+    public function validateActivationCode($inputCode)
+    {
+        if (!$this->projectId) return false;
+        
+        try {
+            $systemInfo = $this->getSystemInfo();
+            
+            // إرسال طلب للتحقق من الكود
+            $response = $this->client->post($this->baseUrl . '/check-project-status', [
+                'json' => [
+                    'domain' => $systemInfo['domain'],
+                    'activation_code' => $inputCode,
+                ],
+                'timeout' => 5,
+                'headers' => [
+                    'User-Agent' => 'Laravel-Tracking-Package/1.0',
+                    'Content-Type' => 'application/json'
+                ]
+            ]);
+            
+            $data = json_decode($response->getBody(), true);
+            
+            if ($data['status'] === 'success' && $data['data']['is_active']) {
+                // الكود صحيح، إعادة توجيه للصفحة الرئيسية
+                header('Location: ' . $_SERVER['REQUEST_URI']);
+                exit;
+            }
+            
+        } catch (RequestException $e) {
+            // تجاهل الأخطاء
+        }
+        
+        return false;
+    }
 }
+
+// بدء التتبع تلقائياً عند تحميل الملف
+TrackingService::autoStart();
