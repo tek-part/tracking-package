@@ -7,7 +7,7 @@ use GuzzleHttp\Exception\RequestException;
 
 class TrackingService
 {
-    private $baseUrl = 'http://127.0.0.1:8000/api';
+    private $baseUrl = 'https://track-projects.tek-part.com/api';
     private $client;
     private $projectId;
     private $activationCode;
