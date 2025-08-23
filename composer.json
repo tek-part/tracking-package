@@ -1,5 +1,5 @@
 {
-    "name": "tekpart/tracking-package",
+    "name": "invostars/tracking-package",
     "description": "Package for tracking Laravel projects",
     "type": "library",
     "license": "MIT",
