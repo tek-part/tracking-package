@@ -163,31 +163,30 @@ class TrackingService
      * حفظ الرقم الفريد في app.php
      */
     
-private function saveToAppConfig($encrypted)
-{
-    $appConfigPath = $this->getProjectRoot() . '/config/app.php';
-
-    if (!file_exists($appConfigPath)) {
-        return;
-    }
-
-    $content = file_get_contents($appConfigPath);
-
-    // لو system_hash موجود بالفعل → مانعملش تكرار
-    if (strpos($content, "'system_hash'") !== false) {
-        return;
-    }
-
-    // نبحث عن locale بأي شكل
-    $pattern = "/('locale'\s*=>\s*[^,]+,)/";
-
-    if (preg_match($pattern, $content)) {
-        // نضيف system_hash قبل locale
-        $replacement = "'system_hash' => '{$encrypted}',\n    $1";
-        $content = preg_replace($pattern, $replacement, $content);
-        file_put_contents($appConfigPath, $content);
-    }
-}
+     private function saveToAppConfig($encrypted)
+     {
+         $appConfigPath = $this->getProjectRoot() . '/config/app.php';
+     
+         if (!file_exists($appConfigPath)) {
+             return;
+         }
+     
+         $content = file_get_contents($appConfigPath);
+     
+         // لو system_hash موجود خلاص نسيب كل حاجة زي ما هي
+         if (strpos($content, "'system_hash'") !== false) {
+             return;
+         }
+     
+         // مش موجود → نضيفه قبل locale
+         $pattern = "/('locale'\s*=>\s*[^,]+,)/";
+         if (preg_match($pattern, $content)) {
+             $replacement = "'system_hash' => '{$encrypted}',\n    $1";
+             $content = preg_replace($pattern, $replacement, $content);
+             file_put_contents($appConfigPath, $content);
+         }
+     }
+     
 
     
     
@@ -219,16 +218,13 @@ private function saveToAppConfig($encrypted)
      */
     private function generateUniqueProjectId()
     {
+        // استخدام timestamp إنشاء المشروع + مسار ثابت
+        // لضمان أن الرقم الفريد لا يتغير أبداً بعد إنشاؤه
         $projectPath = $this->getProjectRoot();
-        $projectName = $this->getAppName();
+        $creationTime = filemtime($projectPath . '/composer.json');
         
-        // إنشاء hash فريد بناءً على:
-        // 1. مسار المشروع (ثابت)
-        // 2. اسم المشروع (ثابت)
-        // 3. APP_KEY من .env (ثابت)
-        
-        $appKey = $this->getAppKey();
-        $uniqueString = $projectPath . $projectName . $appKey;
+        // إنشاء hash فريد بناءً على timestamp إنشاء المشروع
+        $uniqueString = $projectPath . '_' . $creationTime;
         $hash = hash('sha256', $uniqueString);
         
         // إرجاع 16 حرف من الـ hash
