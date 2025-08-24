@@ -1,14 +1,18 @@
 {
-    "name": "invostars/tracking-package",
+    "name": "vendor/tracking-package",
     "description": "Package for tracking Laravel projects",
     "type": "library",
     "license": "MIT",
     "authors": [
         {
-            "name": "TekPart",
-            "email": "info@tek-part.com"
+            "name": "Vendor",
+            "email": "vendor@example.com"
         }
     ],
+    "require": {
+        "php": ">=7.4",
+        "guzzlehttp/guzzle": "^7.0"
+    },
     "autoload": {
         "psr-4": {
             "Vendor\\TrackingPackage\\": "src/"
@@ -23,10 +27,5 @@
                 "Vendor\\TrackingPackage\\TrackingServiceProvider"
             ]
         }
-    },
-    "minimum-stability": "stable",
-    "require": {
-        "php": "^8.0",
-        "illuminate/support": "^10.0|^11.0|^12.0"
     }
 }

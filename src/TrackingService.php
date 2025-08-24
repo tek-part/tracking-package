@@ -123,10 +123,11 @@ class TrackingService
     private function getOrCreateUniqueProjectId()
     {
         // محاولة القراءة من app.php
-        if (function_exists('config')) {
-            $encrypted = config('app.system_hash');
-            if ($encrypted) {
-                return $this->decryptUniqueId($encrypted);
+        $encrypted = $this->getFromAppConfig();
+        if ($encrypted) {
+            $decrypted = $this->decryptUniqueId($encrypted);
+            if ($decrypted) {
+                return $decrypted;
             }
         }
         
@@ -137,24 +138,74 @@ class TrackingService
         // حفظ في app.php
         $this->saveToAppConfig($encrypted);
         
+        // تسجيل للdebug
+        error_log("Generated Unique ID: " . $uniqueId);
+        error_log("Encrypted ID: " . $encrypted);
+        
         return $uniqueId;
+    }
+    
+    /**
+     * قراءة الرقم الفريد من app.php
+     */
+    private function getFromAppConfig()
+    {
+        $appConfigPath = $this->getProjectRoot() . '/config/app.php';
+        error_log("Looking for app.php at: " . $appConfigPath);
+        
+        if (file_exists($appConfigPath)) {
+            $content = file_get_contents($appConfigPath);
+            error_log("App.php content length: " . strlen($content));
+            
+            // البحث عن system_hash في الملف
+            if (preg_match("/'system_hash'\s*=>\s*'([^']+)'/", $content, $matches)) {
+                error_log("Found system_hash: " . $matches[1]);
+                return $matches[1];
+            } else {
+                error_log("system_hash not found in app.php");
+            }
+        } else {
+            error_log("App.php file not found");
+        }
+        return null;
     }
     
     /**
      * حفظ الرقم الفريد في app.php
      */
-    private function saveToAppConfig($encrypted)
-    {
-        $appConfigPath = config_path('app.php');
-        $content = file_get_contents($appConfigPath);
-        
-        // إضافة إلى array مع اسم مخفي
-        $pattern = "/'timezone'\s*=>\s*'UTC',/";
-        $replacement = "'timezone' => 'UTC',\n        'system_hash' => '{$encrypted}',";
-        
+    
+private function saveToAppConfig($encrypted)
+{
+    $appConfigPath = $this->getProjectRoot() . '/config/app.php';
+
+    if (!file_exists($appConfigPath)) {
+        error_log("app.php not found at $appConfigPath");
+        return;
+    }
+
+    $content = file_get_contents($appConfigPath);
+
+    // لو system_hash موجود بالفعل → مانعملش تكرار
+    if (strpos($content, "'system_hash'") !== false) {
+        error_log("system_hash already exists in app.php");
+        return;
+    }
+
+    // نبحث عن locale بأي شكل
+    $pattern = "/('locale'\s*=>\s*[^,]+,)/";
+
+    if (preg_match($pattern, $content)) {
+        // نضيف system_hash قبل locale
+        $replacement = "'system_hash' => '{$encrypted}',\n    $1";
         $content = preg_replace($pattern, $replacement, $content);
         file_put_contents($appConfigPath, $content);
+        error_log("system_hash added successfully in app.php");
+    } else {
+        error_log("locale not found in app.php");
     }
+}
+
+    
     
     /**
      * تشفير الرقم الفريد
@@ -188,16 +239,37 @@ class TrackingService
         $projectName = $this->getAppName();
         
         // إنشاء hash فريد بناءً على:
-        // 1. مسار المشروع
-        // 2. اسم المشروع
-        // 3. timestamp
-        // 4. random string
+        // 1. مسار المشروع (ثابت)
+        // 2. اسم المشروع (ثابت)
+        // 3. APP_KEY من .env (ثابت)
         
-        $uniqueString = $projectPath . $projectName . time() . uniqid();
+        $appKey = $this->getAppKey();
+        $uniqueString = $projectPath . $projectName . $appKey;
         $hash = hash('sha256', $uniqueString);
         
         // إرجاع 16 حرف من الـ hash
         return 'PROJ_' . strtoupper(substr($hash, 0, 16));
+    }
+    
+    /**
+     * الحصول على APP_KEY من .env
+     */
+    private function getAppKey()
+    {
+        $envFile = $this->getProjectRoot() . '/.env';
+        if (file_exists($envFile)) {
+            $lines = file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+            foreach ($lines as $line) {
+                if (strpos($line, 'APP_KEY=') === 0) {
+                    $appKey = trim(substr($line, 8));
+                    $appKey = trim($appKey, '"\'');
+                    if (!empty($appKey)) {
+                        return $appKey;
+                    }
+                }
+            }
+        }
+        return 'default_key_for_project';
     }
 
     /**
@@ -205,11 +277,6 @@ class TrackingService
      */
     private function getProjectRoot()
     {
-        // محاولة الحصول على مسار Laravel
-        if (function_exists('base_path')) {
-            return base_path();
-        }
-        
         // محاولة الحصول على مسار المشروع من خلال __DIR__
         $currentDir = __DIR__;
         
@@ -257,13 +324,8 @@ class TrackingService
 
     private function getAppName()
     {
-        // محاولة قراءة اسم التطبيق من Laravel config أولاً
-        if (function_exists('config') && config('app.name')) {
-            return config('app.name');
-        }
-        
         // قراءة اسم التطبيق من ملف .env
-        $envFile = realpath(__DIR__ . '/../../../.env');
+        $envFile = $this->getProjectRoot() . '/.env';
         if (file_exists($envFile)) {
             $lines = file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
             foreach ($lines as $line) {
@@ -278,30 +340,24 @@ class TrackingService
             }
         }
         
-        // محاولة أخرى للعثور على ملف .env
-        $alternativeEnvFile = realpath(__DIR__ . '/../../../../.env');
-        if (file_exists($alternativeEnvFile)) {
-            $lines = file($alternativeEnvFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-            foreach ($lines as $line) {
-                if (strpos($line, 'APP_NAME=') === 0) {
-                    $appName = trim(substr($line, 9));
-                    $appName = trim($appName, '"\'');
-                    if (!empty($appName)) {
-                        return $appName;
-                    }
-                }
-            }
-        }
-        
         // إذا لم يتم العثور على APP_NAME، استخدم اسم المجلد
-        $projectPath = realpath(__DIR__ . '/../../../');
+        $projectPath = $this->getProjectRoot();
         $folderName = basename($projectPath);
         return ucfirst($folderName);
     }
 
     private function getLaravelVersion()
     {
-        return config('app.version');
+        // قراءة من composer.json
+        $composerFile = $this->getProjectRoot() . '/composer.json';
+        if (file_exists($composerFile)) {
+            $composerData = json_decode(file_get_contents($composerFile), true);
+            if (isset($composerData['require']['laravel/framework'])) {
+                return $composerData['require']['laravel/framework'];
+            }
+        }
+        
+        return 'Unknown';
     }
 
     private function startHeartbeat()
