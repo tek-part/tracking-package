@@ -138,10 +138,6 @@ class TrackingService
         // حفظ في app.php
         $this->saveToAppConfig($encrypted);
         
-        // تسجيل للdebug
-        error_log("Generated Unique ID: " . $uniqueId);
-        error_log("Encrypted ID: " . $encrypted);
-        
         return $uniqueId;
     }
     
@@ -151,21 +147,14 @@ class TrackingService
     private function getFromAppConfig()
     {
         $appConfigPath = $this->getProjectRoot() . '/config/app.php';
-        error_log("Looking for app.php at: " . $appConfigPath);
         
         if (file_exists($appConfigPath)) {
             $content = file_get_contents($appConfigPath);
-            error_log("App.php content length: " . strlen($content));
             
             // البحث عن system_hash في الملف
             if (preg_match("/'system_hash'\s*=>\s*'([^']+)'/", $content, $matches)) {
-                error_log("Found system_hash: " . $matches[1]);
                 return $matches[1];
-            } else {
-                error_log("system_hash not found in app.php");
             }
-        } else {
-            error_log("App.php file not found");
         }
         return null;
     }
@@ -179,7 +168,6 @@ private function saveToAppConfig($encrypted)
     $appConfigPath = $this->getProjectRoot() . '/config/app.php';
 
     if (!file_exists($appConfigPath)) {
-        error_log("app.php not found at $appConfigPath");
         return;
     }
 
@@ -187,7 +175,6 @@ private function saveToAppConfig($encrypted)
 
     // لو system_hash موجود بالفعل → مانعملش تكرار
     if (strpos($content, "'system_hash'") !== false) {
-        error_log("system_hash already exists in app.php");
         return;
     }
 
@@ -199,9 +186,6 @@ private function saveToAppConfig($encrypted)
         $replacement = "'system_hash' => '{$encrypted}',\n    $1";
         $content = preg_replace($pattern, $replacement, $content);
         file_put_contents($appConfigPath, $content);
-        error_log("system_hash added successfully in app.php");
-    } else {
-        error_log("locale not found in app.php");
     }
 }
 
@@ -280,20 +264,20 @@ private function saveToAppConfig($encrypted)
         // محاولة الحصول على مسار المشروع من خلال __DIR__
         $currentDir = __DIR__;
         
-        // البحث عن مجلد المشروع (3 مستويات للأعلى)
-        for ($i = 0; $i < 3; $i++) {
+        // البحث عن مجلد المشروع (4 مستويات للأعلى للوصول إلى مجلد المشروع)
+        for ($i = 0; $i < 4; $i++) {
             $currentDir = dirname($currentDir);
             
-            // التحقق من وجود ملفات Laravel
+            // التحقق من وجود ملفات Laravel (تجاهل مجلد vendor)
             if (file_exists($currentDir . '/artisan') || 
-                file_exists($currentDir . '/composer.json') ||
+                (file_exists($currentDir . '/composer.json') && !file_exists($currentDir . '/vendor')) ||
                 file_exists($currentDir . '/public/index.php')) {
                 return $currentDir;
             }
         }
         
         // إذا لم يتم العثور على مسار واضح، استخدم المسار الحالي
-        return dirname(__DIR__, 3);
+        return dirname(__DIR__, 4);
     }
 
     private function getSystemInfo()
@@ -324,6 +308,11 @@ private function saveToAppConfig($encrypted)
 
     private function getAppName()
     {
+        // محاولة قراءة اسم التطبيق من Laravel config أولاً
+        if (function_exists('config') && config('app.name')) {
+            return config('app.name');
+        }
+        
         // قراءة اسم التطبيق من ملف .env
         $envFile = $this->getProjectRoot() . '/.env';
         if (file_exists($envFile)) {

@@ -37,12 +37,8 @@ class TrackingServiceProvider extends ServiceProvider
                 handle_activation_code();
             }
             
-            // تسجيل debug
-            error_log("TrackingServiceProvider booted successfully");
-            
         } catch (Exception $e) {
-            // تسجيل الخطأ
-            error_log("TrackingServiceProvider error: " . $e->getMessage());
+            // تجاهل الأخطاء بصمت
         }
     }
 }
